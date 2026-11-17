@@ -98,7 +98,8 @@ var LAV = (function () {
   function norm(code) { return String(code || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
   function topic(code, dir) { return 'mvlav-' + norm(code) + '-' + dir; }
   /* Il servizio di abbinamento serve solo per i primi secondi (scambio dei "biglietti da visita" dei due apparecchi). Poi i segni viaggiano diretti tablet -> PC. */
-  function pub(code, dir, obj) { try { return fetch(RELAY + '/' + topic(code, dir), { method: 'POST', body: JSON.stringify(obj) }).catch(function () {}); } catch (e) {} }
+  var self = {};
+  function pub(code, dir, obj) { try { return fetch(RELAY + '/' + topic(code, dir), { method: 'POST', body: JSON.stringify(obj) }).then(function (r) { if (r && r.status === 429) { self.limited = true; if (self.onlimit) self.onlimit(); } return r; }).catch(function () {}); } catch (e) {} }
   function sub(code, dir, cb, onerr) {
     var es = new EventSource(RELAY + '/' + topic(code, dir) + '/sse');
     es.onmessage = function (e) { try { var m = JSON.parse(e.data); if (m && m.event === 'message') cb(JSON.parse(m.message)); } catch (x) {} };
@@ -145,7 +146,8 @@ var LAV = (function () {
       ctx.restore();
     }
   }
-  return { RELAY: RELAY, ICE: ICE, rnd: rnd, norm: norm, pub: pub, sub: sub, iceBatch: iceBatch, prune: prune, draw: draw };
+  self.RELAY = RELAY; self.ICE = ICE; self.rnd = rnd; self.norm = norm; self.pub = pub; self.sub = sub; self.iceBatch = iceBatch; self.prune = prune; self.draw = draw;
+  return self;
 })();
 
 (function () {
@@ -168,14 +170,15 @@ var LAV = (function () {
   function link() {
     stopLink(); if (!running) return;
     sid = LAV.rnd(8); joinN = 0;
-    es = LAV.sub(code, 'tb', onMsg, function () { if (!connected) gstate('Non riesco a raggiungere il servizio di collegamento. Serve internet (va bene anche l’hotspot del telefono).'); });
+    es = LAV.sub(code, 'tb', onMsg, function () { if (!connected) gstate(LAV.limited ? 'Il servizio gratuito di collegamento ha raggiunto il limite di messaggi (succede dopo molte prove). Riprova tra qualche ora oppure usa un altro internet, per esempio l’hotspot del telefono.' : 'Non riesco a raggiungere il servizio di collegamento. Serve internet (va bene anche l’hotspot del telefono).'); });
     join();
   }
+  LAV.onlimit = function () { if (!connected) gstate('Il servizio gratuito di collegamento ha raggiunto il limite di messaggi (succede dopo molte prove). Riprova tra qualche ora oppure usa un altro internet, per esempio l’hotspot del telefono.'); };
   function join() {
     if (!running || connected) return;
     LAV.pub(code, 'pc', { t: 'join', sid: sid });
-    if (joinN === 2) gstate('Cerco il PC… sul PC premi «Lavagna tablet» nel Reader.');
-    joinT = setTimeout(join, Math.min(15000, 3000 + (joinN++) * 2000));
+    if (joinN === 2 && !LAV.limited) gstate('Cerco il PC con il codice ' + code.toUpperCase() + '… Se sul PC il codice è diverso, premi «Scollega» e scrivi quello del PC.');
+    joinT = setTimeout(join, Math.min(20000, 3000 + (joinN++) * 2000));
   }
   function addIce(c) { try { var p = pc.addIceCandidate(c); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
   function onMsg(m) {
