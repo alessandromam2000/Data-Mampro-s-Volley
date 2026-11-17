@@ -22,13 +22,14 @@ h1{margin:0;font-size:28px;letter-spacing:.2px}
 #gstate{min-height:24px;color:var(--gold);font-weight:600}
 #gate .by{margin-top:8px;font-size:13px}
 #app{height:100%;display:flex}
-#padwrap{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:10px}
+#padwrap{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px}
 #pad{position:relative;background:#050A0D;border:2px solid var(--line);border-radius:6px;overflow:hidden}
-#pad img,#pad canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#pad img,#pad canvas,#pad video{position:absolute;inset:0;width:100%;height:100%;display:block}
+#tv{object-fit:fill;background:#000}
 #bg{object-fit:fill;opacity:.92}
 #cv{touch-action:none;cursor:crosshair}
 #novid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#52707A;font-size:18px;pointer-events:none}
-#tools{width:236px;flex:none;background:var(--panel);border-left:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:9px;overflow-y:auto;touch-action:pan-y}
+#tools{width:200px;flex:none;background:var(--panel);border-left:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:9px;overflow-y:auto;touch-action:pan-y}
 .grp{display:flex;gap:6px}.grp>button{flex:1;padding:6px 4px;min-width:0}
 #stat{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
 #dot{width:11px;height:11px;border-radius:50%;background:#34C759;flex:none}
@@ -38,6 +39,9 @@ h1{margin:0;font-size:28px;letter-spacing:.2px}
 .sw.on{outline:3px solid var(--acc);outline-offset:1px;background:#1F3944;color:inherit}
 .wd i{background:#EAF2F4;border:0}
 .small{font-size:14px;min-height:44px}
+body.bigmode #tools{display:none}
+#fab{position:fixed;right:12px;bottom:12px;display:none;gap:8px;z-index:8}body.bigmode #fab{display:flex}
+#fab button{width:58px;min-height:58px;border-radius:50%;font-size:24px;padding:0;background:rgba(22,40,48,.86);backdrop-filter:blur(4px)}
 #lost{position:fixed;left:50%;top:14px;transform:translateX(-50%);background:#8A2A1E;color:#fff;padding:10px 18px;border-radius:12px;font-weight:600;z-index:9}
 @media (orientation:portrait){
   #app{flex-direction:column}
@@ -56,7 +60,7 @@ h1{margin:0;font-size:28px;letter-spacing:.2px}
   <small class="by">Data Mampro’s Volley · Creato da Alessandro Mamprin</small>
 </div>
 <div id="app" hidden>
-  <div id="padwrap"><div id="pad"><img id="bg" alt=""><div id="novid">Nessun video</div><canvas id="cv"></canvas></div></div>
+  <div id="padwrap"><div id="pad"><video id="tv" muted playsinline autoplay hidden></video><img id="bg" alt=""><div id="novid">Nessun video</div><canvas id="cv"></canvas></div></div>
   <aside id="tools">
     <div id="stat"><span id="dot"></span><span id="stxt">Collegato</span><span id="tm"></span></div>
     <div class="grp"><button data-tool="pen" class="on" type="button">Penna</button><button data-tool="hl" type="button">Evid.</button></div>
@@ -78,8 +82,10 @@ h1{margin:0;font-size:28px;letter-spacing:.2px}
     <button id="cop" class="small on" type="button">Cancella al play: sì</button>
     <div class="grp"><button id="b-prev" type="button" aria-label="Azione precedente">⏮</button><button id="b-m5" type="button">−5s</button><button id="b-play" type="button" aria-label="Play o pausa">▶</button><button id="b-p5" type="button">+5s</button><button id="b-next" type="button" aria-label="Azione successiva">⏭</button></div>
     <button id="prevb" class="small on" type="button">Anteprima video: sì</button>
+    <button id="big" class="small" type="button">⛶ Lavagna grande</button>
     <button id="exit" class="small" type="button">Scollega</button>
   </aside>
+  <div id="fab"><button id="fab-undo" type="button" aria-label="Annulla">↶</button><button id="fab-menu" type="button" aria-label="Mostra i comandi">≡</button></div>
   <div id="lost" hidden>Collegamento perso… riprovo</div>
 </div>
 <script>
@@ -147,7 +153,7 @@ var LAV = (function () {
   var $ = function (id) { return document.getElementById(id); };
   var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
   var code = '', running = false, sid = '', es = null, pc = null, dc = null, connected = false, joinT = null, joinN = 0, lastRx = 0, dropT = null, wd = null;
-  var pend = [], haveRemote = false;
+  var pend = [], haveRemote = false, live = false, pingT = null;
   var strokes = [], cur = null, cfg = { tool: 'pen', c: '#FF3B30', w: 0.008, fade: 0, cop: true, prev: true }, ar = 16 / 9, penSeen = false, paused = true;
   var cv = $('cv'), ctx = cv.getContext('2d'), pad = $('pad'), dpr = 1;
 
@@ -180,6 +186,12 @@ var LAV = (function () {
       pc = new RTCPeerConnection({ iceServers: LAV.ICE });
       var sendIce = LAV.iceBatch(function (b) { LAV.pub(code, 'pc', { t: 'ice', sid: sid, c: b }); });
       pc.onicecandidate = function (e) { sendIce(e.candidate); };
+      pc.ontrack = function (e) {
+        var tv = $('tv'); try { tv.srcObject = (e.streams && e.streams[0]) || new MediaStream([e.track]); } catch (x) { return; }
+        var go = function () { var q = tv.play(); if (q && q.catch) q.catch(function () {}); };
+        tv.onplaying = function () { live = true; tv.hidden = false; $('bg').hidden = true; $('novid').hidden = true; send({ t: 'live', ok: true }); };
+        e.track.onmute = function () {}; go();
+      };
       pc.ondatachannel = function (e) { dc = e.channel; dc.onopen = onOpen; dc.onmessage = onData; dc.onclose = onLost; if (dc.readyState === 'open') onOpen(); };
       pc.onconnectionstatechange = function () {
         var s = pc && pc.connectionState;
@@ -202,14 +214,15 @@ var LAV = (function () {
     connected = true; clearTimeout(joinT); clearTimeout(dropT); try { if (es) es.close(); } catch (e) {} es = null;
     lastRx = Date.now(); gstate('');
     $('gate').hidden = true; $('app').hidden = false; $('lost').hidden = true;
-    send({ t: 'prev', on: cfg.prev }); send({ t: 'cfg', cop: cfg.cop });
+    send({ t: 'prev', on: cfg.prev }); send({ t: 'cfg', cop: cfg.cop }); send({ t: 'live', ok: live });
+    clearInterval(pingT); pingT = setInterval(function () { send({ t: 'pg', ts: Date.now() }); }, 2000); send({ t: 'pg', ts: Date.now() });
     fit(); redraw();
     try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (e) {}
     clearInterval(wd); wd = setInterval(function () { if (connected && Date.now() - lastRx > 8000) onLost(); }, 2000);
   }
   function onLost() {
     if (!running) return;
-    var was = connected; stopLink(); clearInterval(wd);
+    var was = connected; stopLink(); clearInterval(wd); clearInterval(pingT); live = false; $('tv').hidden = true; $('bg').hidden = false; try { $('tv').srcObject = null; } catch (x) {}
     if (was) { $('lost').hidden = false; } else { gstate('Collegamento non riuscito, riprovo…'); }
     setTimeout(function () { if (running) link(); }, 1000);
   }
@@ -218,7 +231,7 @@ var LAV = (function () {
     if (code.length < 4) { gstate('Scrivi il codice che vedi sul PC.'); return; }
     store.set('lav_code', code); running = true; gstate('Cerco il PC…'); link();
   }
-  function exit() { running = false; stopLink(); clearInterval(wd); $('app').hidden = true; $('gate').hidden = false; gstate(''); strokes = []; }
+  function exit() { running = false; stopLink(); clearInterval(wd); clearInterval(pingT); document.body.classList.remove('bigmode'); $('app').hidden = true; $('gate').hidden = false; gstate(''); strokes = []; }
 
   /* ---------- dati dal PC ---------- */
   var frames = {};
@@ -230,7 +243,9 @@ var LAV = (function () {
       $('tm').textContent = fmt(m.ct) + (m.du ? ' / ' + fmt(m.du) : '') + (m.q ? '  ·  ' + m.q : '');
       $('novid').hidden = !!m.v;
       if (m.ar && Math.abs(m.ar - ar) > 0.01) { ar = m.ar; fit(); redraw(); }
+    } else if (m.t === 'pn') { $('stxt').textContent = 'Collegato · ' + Math.max(1, Date.now() - m.ts) + ' ms';
     } else if (m.t === 'f') {
+      if (live) return;
       var f = frames[m.id] || (frames[m.id] = { n: m.n, got: 0, p: [] });
       if (f.p[m.i] === undefined) { f.p[m.i] = m.d; f.got++; }
       if (f.got === f.n) { $('bg').src = 'data:image/jpeg;base64,' + f.p.join(''); $('novid').hidden = true; frames = {}; }
@@ -257,7 +272,7 @@ var LAV = (function () {
     outT = null; if (!cur) { if (!out.length) return; }
     var o = out.splice(0); o.forEach(function (m) { send(m); });
   }
-  function queue(m) { out.push(m); if (!outT) outT = setTimeout(flush, 25); }
+  function queue(m) { out.push(m); if (!outT) outT = setTimeout(flush, 6); }
   function msgOf(s, pts, set) { return { t: 'p', id: s.id, tool: s.tool, c: s.c, w: s.w, f: s.f, pts: pts, set: set }; }
   var shape = function (t) { return t === 'arrow' || t === 'circle' || t === 'line'; };
   cv.addEventListener('pointerdown', function (e) {
@@ -296,12 +311,16 @@ var LAV = (function () {
   $('fade').addEventListener('click', function () { cfg.fade = FADES[(FADES.indexOf(cfg.fade) + 1) % FADES.length]; store.set('lav_fade', String(cfg.fade)); fadeLabel(); });
   function copLabel() { $('cop').textContent = 'Cancella al play: ' + (cfg.cop ? 'sì' : 'no'); $('cop').classList.toggle('on', cfg.cop); }
   $('cop').addEventListener('click', function () { cfg.cop = !cfg.cop; store.set('lav_cop', cfg.cop ? '1' : '0'); copLabel(); send({ t: 'cfg', cop: cfg.cop }); });
-  $('prevb').addEventListener('click', function () { cfg.prev = !cfg.prev; $('prevb').textContent = 'Anteprima video: ' + (cfg.prev ? 'sì' : 'no'); $('prevb').classList.toggle('on', cfg.prev); if (!cfg.prev) $('bg').removeAttribute('src'); send({ t: 'prev', on: cfg.prev }); });
+  $('prevb').addEventListener('click', function () { cfg.prev = !cfg.prev; $('prevb').textContent = 'Anteprima video: ' + (cfg.prev ? 'sì' : 'no'); $('prevb').classList.toggle('on', cfg.prev); if (!cfg.prev) $('bg').removeAttribute('src'); $('tv').style.visibility = cfg.prev ? 'visible' : 'hidden'; send({ t: 'prev', on: cfg.prev }); });
   $('b-play').addEventListener('click', function () { send({ t: 'cmd', a: 'play' }); });
   $('b-m5').addEventListener('click', function () { send({ t: 'cmd', a: 'seek', d: -5 }); });
   $('b-p5').addEventListener('click', function () { send({ t: 'cmd', a: 'seek', d: 5 }); });
   $('b-prev').addEventListener('click', function () { send({ t: 'cmd', a: 'prev' }); });
   $('b-next').addEventListener('click', function () { send({ t: 'cmd', a: 'next' }); });
+  function bigMode(on) { document.body.classList.toggle('bigmode', on); fit(); redraw(); }
+  $('big').addEventListener('click', function () { bigMode(true); });
+  $('fab-menu').addEventListener('click', function () { bigMode(false); });
+  $('fab-undo').addEventListener('click', function () { $('undo').click(); });
   $('exit').addEventListener('click', exit);
   $('go').addEventListener('click', start);
   $('code').addEventListener('keydown', function (e) { if (e.key === 'Enter') start(); });
