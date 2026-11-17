@@ -359,16 +359,15 @@ var LAV = (function () {
   function onData(e) {
     lastRx = Date.now(); var m; try { m = JSON.parse(e.data); } catch (x) { return; }
     if (m.t === 'st') {
-      paused = !!m.p; $('b-play').textContent = paused ? '▶' : '❚❚';
+      paused = !!m.p; $('b-play').textContent = paused ? '▶' : '❚❚'; if (live && !paused) $('bg').hidden = true;
       $('tm').textContent = fmt(m.ct) + (m.du ? ' / ' + fmt(m.du) : '') + (m.q ? '  ·  ' + m.q : '');
       $('novid').hidden = !!m.v;
       if (m.ar && Math.abs(m.ar - ar) > 0.01) { ar = m.ar; fit(); redraw(); }
     } else if (m.t === 'pn') { $('stxt').textContent = 'Collegato · ' + Math.max(1, Date.now() - m.ts) + ' ms';
     } else if (m.t === 'f') {
-      if (live) return;
       var f = frames[m.id] || (frames[m.id] = { n: m.n, got: 0, p: [] });
       if (f.p[m.i] === undefined) { f.p[m.i] = m.d; f.got++; }
-      if (f.got === f.n) { $('bg').src = 'data:image/jpeg;base64,' + f.p.join(''); $('novid').hidden = true; frames = {}; }
+      if (f.got === f.n) { frames = {}; $('bg').src = 'data:image/jpeg;base64,' + f.p.join(''); $('bg').hidden = false; $('bg').style.opacity = live ? 1 : ''; $('novid').hidden = true; }
     } else if (m.t === 'clr') { strokes = []; redraw(); }
   }
 
