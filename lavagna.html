@@ -99,10 +99,35 @@ var LAV = (function () {
   function topic(code, dir) { return 'mvlav-' + norm(code) + '-' + dir; }
   /* Il servizio di abbinamento serve solo per i primi secondi (scambio dei "biglietti da visita" dei due apparecchi). Poi i segni viaggiano diretti tablet -> PC. */
   var self = {};
-  function pub(code, dir, obj) { try { return fetch(RELAY + '/' + topic(code, dir), { method: 'POST', body: JSON.stringify(obj) }).then(function (r) { if (r && r.status === 429) { self.limited = true; if (self.onlimit) self.onlimit(); } return r; }).catch(function () {}); } catch (e) {} }
+  /* Il servizio accetta messaggi fino a circa 4000 caratteri: i messaggi piu' lunghi (il "biglietto da visita" con il video) si spezzano in pezzi e si rimettono insieme dall'altra parte. */
+  var MAXP = 1500;
+  function post(code, dir, text) {
+    return fetch(RELAY + '/' + topic(code, dir), { method: 'POST', body: text }).then(function (r) { if (r && r.status === 429) { self.limited = true; if (self.onlimit) self.onlimit(); } return r; }).catch(function () {});
+  }
+  function pub(code, dir, obj) {
+    try {
+      var t = JSON.stringify(obj);
+      if (t.length <= 3000) return post(code, dir, t);
+      var id = rnd(6), n = Math.ceil(t.length / MAXP), ps = [];
+      for (var k = 0; k < n; k++) ps.push(post(code, dir, JSON.stringify({ _p: id, i: k, n: n, d: t.substr(k * MAXP, MAXP) })));
+      return Promise.all(ps);
+    } catch (e) {}
+  }
   function sub(code, dir, cb, onerr) {
-    var es = new EventSource(RELAY + '/' + topic(code, dir) + '/sse');
-    es.onmessage = function (e) { try { var m = JSON.parse(e.data); if (m && m.event === 'message') cb(JSON.parse(m.message)); } catch (x) {} };
+    var es = new EventSource(RELAY + '/' + topic(code, dir) + '/sse'), parts = {};
+    es.onmessage = function (e) {
+      try {
+        var m = JSON.parse(e.data); if (!m || m.event !== 'message') return;
+        var o = JSON.parse(m.message);
+        if (o && o._p) {
+          var g = parts[o._p] || (parts[o._p] = { n: o.n, got: 0, a: [] });
+          if (g.a[o.i] == null) { g.a[o.i] = o.d; g.got++; }
+          if (g.got === g.n) { delete parts[o._p]; cb(JSON.parse(g.a.join(''))); }
+          return;
+        }
+        cb(o);
+      } catch (x) {}
+    };
     es.onerror = function () { if (onerr) onerr(); };
     return es;
   }
