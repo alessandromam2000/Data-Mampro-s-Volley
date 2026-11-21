@@ -1029,7 +1029,7 @@ var conv = (function () {
 
 /* ---------- 10. VIDEO: cartella DVS_VIDEO ricordata e abbinamento scout -> video ---------- */
 var video = (function () {
-  var handle = null, perm = 'none', cands = [], local = [], links = {}, manual = {}, subs = [], scanning = false, lastScan = 0;
+  var handle = null, perm = 'none', stuck = false, cands = [], local = [], links = {}, manual = {}, subs = [], scanning = false, lastScan = 0;
   var VIDEO_RE = /\.(mp4|mov|m4v|mkv|avi|webm)$/i;
   function emit() { subs.forEach(function (f) { try { f(); } catch (e) {} }); }
   function norm(s) { return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
@@ -1105,17 +1105,20 @@ var video = (function () {
     },
     checkPerm: async function () {
       if (!handle) { perm = 'none'; return perm; }
-      try { /* alcune versioni di Edge non rispondono mai: dopo 2 secondi vado avanti come se servisse ricollegare la cartella */ perm = await Promise.race([handle.queryPermission({ mode: 'read' }), new Promise(function (r) { setTimeout(function () { r('prompt'); }, 2000); })]); } catch (e) { perm = 'prompt'; }
+      if (stuck) { perm = 'prompt'; return perm; }
+      try { /* alcune versioni di Edge non rispondono mai: dopo 2 secondi vado avanti come se servisse ricollegare la cartella */ perm = await Promise.race([handle.queryPermission({ mode: 'read' }), new Promise(function (r) { setTimeout(function () { stuck = true; r('prompt'); }, 2000); })]); } catch (e) { perm = 'prompt'; }
       return perm;
     },
+    /* la cartella ricordata non risponde (Edge): va scelta di nuovo con la finestra */
+    get stuck() { return stuck; },
     /* gesto dell'utente (clic): chiede il permesso di rileggere la cartella gia' scelta */
     reconnect: async function () {
-      if (!handle) return false;
-      try { var p = await handle.requestPermission({ mode: 'read' }); perm = p; } catch (e) { return false; }
+      if (!handle || stuck) return false;
+      try { var p = await Promise.race([handle.requestPermission({ mode: 'read' }), new Promise(function (r) { setTimeout(function () { stuck = true; r('prompt'); }, 3000); })]); perm = p; } catch (e) { return false; }
       if (perm === 'granted') await api.rescan();
       return perm === 'granted';
     },
-    setHandle: async function (h) { handle = h; perm = 'granted'; await kvSet('dir', h); await api.rescan(); },
+    setHandle: async function (h) { handle = h; perm = 'granted'; stuck = false; await kvSet('dir', h); await api.rescan(); },
     choose: async function (win) {
       var w = win || window;
       if (!w.showDirectoryPicker) throw new Error('Questo browser non puo\' ricordare la cartella dei video: usa Chrome o Edge.');
