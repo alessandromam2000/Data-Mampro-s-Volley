@@ -1105,7 +1105,7 @@ var video = (function () {
     },
     checkPerm: async function () {
       if (!handle) { perm = 'none'; return perm; }
-      try { perm = await handle.queryPermission({ mode: 'read' }); } catch (e) { perm = 'prompt'; }
+      try { /* alcune versioni di Edge non rispondono mai: dopo 2 secondi vado avanti come se servisse ricollegare la cartella */ perm = await Promise.race([handle.queryPermission({ mode: 'read' }), new Promise(function (r) { setTimeout(function () { r('prompt'); }, 2000); })]); } catch (e) { perm = 'prompt'; }
       return perm;
     },
     /* gesto dell'utente (clic): chiede il permesso di rileggere la cartella gia' scelta */
@@ -1757,7 +1757,8 @@ MVN.video.on(function () { renderTop(); renderVideo(); try { FR.analisi && FR.an
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   await MVN.lib.load();
   try { await MVN.conv.load(); } catch (e) {}
-  await MVN.video.init();
+  /* la cartella dei video non deve mai bloccare l'apertura del portale */
+  try { await Promise.race([MVN.video.init(), new Promise(function (r) { setTimeout(r, 4000); })]); } catch (e) {}
   renderAll(); legacyCheck(); go('sel');
   if (MVN.lib.entries.length) toast('Libreria caricata: ' + MVN.lib.entries.length + ' partite.');
   window.MV_READY = true;
